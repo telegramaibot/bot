@@ -1,0 +1,14 @@
+# === MODIFIED ===
+aiogram==3.13.1
+aiosqlite==0.20.0
+APScheduler==3.10.4
+aiofiles==24.1.0
+ffmpeg-python>=0.2.0
+google-generativeai>=0.7.0
+gTTS==2.5.4
+langdetect>=1.0.9
+loguru==0.7.2
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.1
+python-jose[cryptography]==3.3.0
+Telethon==1.36.0
