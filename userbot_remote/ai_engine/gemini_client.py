@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
 class GeminiClient:
     """Provide async Gemini helpers used across the project."""
 
-    def __init__(self, api_key: str | None, model_name: str = "gemini-1.5-flash") -> None:
+    def __init__(self, api_key: str | None, model_name: str = "gemini-2.0-flash") -> None:
         self.api_key = (api_key or "").strip()
         self.model_name = model_name.strip() or "gemini-1.5-flash"
         self.enabled = bool(self.api_key and _GENAI_AVAILABLE)

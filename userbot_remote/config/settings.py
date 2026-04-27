@@ -115,7 +115,7 @@ class Settings:
             jwt_secret=os.getenv("JWT_SECRET", "").strip(),
             session_expire_hours=int(os.getenv("SESSION_EXPIRE_HOURS", "24")),
             gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip() or None,
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip() or "gemini-1.5-flash",
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash",
             auto_respond_chats=_parse_int_list(os.getenv("AUTO_RESPOND_CHATS")),
             monitor_keywords=_parse_str_list(os.getenv("MONITOR_KEYWORDS")),
             log_channel_id=_optional_int(os.getenv("LOG_CHANNEL_ID")),
