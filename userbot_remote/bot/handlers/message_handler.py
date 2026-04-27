@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-# === NEW CODE ===
+# === MODIFIED ===
 
 import asyncio
+import re
+import time
 from pathlib import Path
 
 from aiogram import Bot
@@ -15,6 +17,12 @@ from userbot_remote.config.settings import Settings
 from userbot_remote.db.repository import Repository
 from userbot_remote.userbot.media_ops import download_media
 from userbot_remote.utils.helpers import chunk_text
+
+
+# Minimum seconds between AI calls for the same chat
+_CHAT_COOLDOWN_SEC = 300   # 5 daqiqa
+# Minimum seconds between any two Gemini calls globally
+_GLOBAL_COOLDOWN_SEC = 15
 
 
 class KeywordMonitor:
@@ -28,16 +36,6 @@ class KeywordMonitor:
         settings: Settings,
         temp_dir: str | Path,
     ) -> None:
-        """Store dependencies used by the monitor.
-
-        Args:
-            repository: Shared repository.
-            gemini_client: Gemini analysis wrapper.
-            bot: Aiogram control bot.
-            settings: Application settings.
-            temp_dir: Temporary directory for downloaded files.
-        """
-
         self.repository = repository
         self.gemini_client = gemini_client
         self.bot = bot
@@ -45,14 +43,12 @@ class KeywordMonitor:
         self.temp_dir = Path(temp_dir).resolve()
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self._keywords = list(settings.monitor_keywords)
+        # cooldown trackers
+        self._chat_last_alert: dict[int, float] = {}
+        self._last_gemini_call: float = 0.0
 
     async def check_message(self, message, client) -> None:
-        """Inspect an incoming message and send a briefing when needed.
-
-        Args:
-            message: Telethon incoming message.
-            client: Active Telethon client.
-        """
+        """Inspect an incoming message and send a briefing when needed."""
 
         chat = await message.get_chat()
         sender = await message.get_sender()
@@ -82,8 +78,22 @@ class KeywordMonitor:
         if keyword is None:
             return
 
-        if await self.repository.monitor_log_exists(message.chat_id or 0, message.id, keyword):
+        # Per-chat cooldown — bir xil chatga 5 daqiqada bir marta
+        chat_id = message.chat_id or 0
+        now = time.monotonic()
+        if now - self._chat_last_alert.get(chat_id, 0) < _CHAT_COOLDOWN_SEC:
             return
+
+        if await self.repository.monitor_log_exists(chat_id, message.id, keyword):
+            return
+
+        # Global Gemini rate limit
+        elapsed = now - self._last_gemini_call
+        if elapsed < _GLOBAL_COOLDOWN_SEC:
+            await asyncio.sleep(_GLOBAL_COOLDOWN_SEC - elapsed)
+
+        self._chat_last_alert[chat_id] = time.monotonic()
+        self._last_gemini_call = time.monotonic()
 
         context_messages = await self._fetch_context_messages(client, chat, limit=10)
         context_summary = await self.gemini_client.summarize_messages(context_messages)
@@ -102,33 +112,30 @@ class KeywordMonitor:
 
             summary = context_summary
             if file_analysis:
+                self._last_gemini_call = time.monotonic()
                 summary = await self.gemini_client.analyze_text(
-                    "\n\n".join(
-                        [
-                            f"Chat: {chat_title}",
-                            f"Kalit so'z: {keyword}",
-                            f"Kontekst: {context_summary}",
-                            f"Fayl tahlili: {file_analysis}",
-                        ]
-                    )
+                    "\n\n".join([
+                        f"Chat: {chat_title}",
+                        f"Kalit so'z: {keyword}",
+                        f"Kontekst: {context_summary}",
+                        f"Fayl tahlili: {file_analysis}",
+                    ])
                 )
 
-            alert = "\n".join(
-                [
-                    f"📌 Manba: {chat_title}",
-                    f"🕐 Vaqt: {message.date.isoformat().replace('T', ' ')}",
-                    f"🔑 Kalit so'z: {keyword}",
-                    "📋 Xulosa:",
-                    summary,
-                ]
-            )
+            alert = "\n".join([
+                f"📌 Manba: {chat_title}",
+                f"🕐 Vaqt: {message.date.isoformat().replace('T', ' ')}",
+                f"🔑 Kalit so'z: {keyword}",
+                "📋 Xulosa:",
+                summary,
+            ])
 
             if self.settings.log_channel_id is not None:
                 for chunk in chunk_text(alert):
                     await self.bot.send_message(self.settings.log_channel_id, chunk)
 
             await self.repository.save_monitor_log(
-                chat_id=message.chat_id or 0,
+                chat_id=chat_id,
                 message_id=message.id,
                 chat_title=chat_title,
                 keyword=keyword,
@@ -143,14 +150,7 @@ class KeywordMonitor:
                 await asyncio.to_thread(self._cleanup_file, downloaded_path)
 
     def update_keywords(self, raw_words: str) -> list[str]:
-        """Update in-memory monitor keywords at runtime.
-
-        Args:
-            raw_words: Comma- or space-separated keywords.
-
-        Returns:
-            Updated keyword list.
-        """
+        """Update in-memory monitor keywords at runtime."""
 
         if "," in raw_words:
             items = [item.strip().lower() for item in raw_words.split(",") if item.strip()]
@@ -164,20 +164,21 @@ class KeywordMonitor:
 
     def get_keywords(self) -> list[str]:
         """Return the active runtime keyword list."""
-
         return list(self._keywords)
 
+    def _match_keyword(self, text: str) -> str | None:
+        """Find the first configured keyword in a message using word boundaries."""
+
+        lowered = text.lower()
+        for keyword in self._keywords:
+            # Use word boundary matching to avoid 'ali' matching inside 'bali', 'quality' etc.
+            pattern = r"(?<![a-zA-Z\u0400-\u04FF\w])" + re.escape(keyword) + r"(?![a-zA-Z\u0400-\u04FF\w])"
+            if re.search(pattern, lowered):
+                return keyword
+        return None
+
     async def _fetch_context_messages(self, client, chat, limit: int = 10) -> list[dict]:
-        """Fetch recent messages from a chat for AI context.
-
-        Args:
-            client: Active Telethon client.
-            chat: Telethon chat entity.
-            limit: Number of messages to fetch.
-
-        Returns:
-            Chronologically ordered message dictionaries.
-        """
+        """Fetch recent messages from a chat for AI context."""
 
         messages: list[dict] = []
         async for item in client.iter_messages(chat, limit=max(limit, 1)):
@@ -185,34 +186,21 @@ class KeywordMonitor:
             sender_name = " ".join(
                 part for part in [getattr(sender, "first_name", None), getattr(sender, "last_name", None)] if part
             ).strip() or getattr(sender, "username", None) or "Noma'lum"
-            messages.append(
-                {
-                    "id": item.id,
-                    "chat_id": getattr(chat, "id", 0),
-                    "chat_title": getattr(chat, "title", None) or getattr(chat, "first_name", None) or "Chat",
-                    "sender_id": getattr(sender, "id", None),
-                    "sender_name": sender_name,
-                    "text": item.message or "",
-                    "media_type": self._detect_media_type(item),
-                    "timestamp": item.date.isoformat(),
-                }
-            )
+            messages.append({
+                "id": item.id,
+                "chat_id": getattr(chat, "id", 0),
+                "chat_title": getattr(chat, "title", None) or getattr(chat, "first_name", None) or "Chat",
+                "sender_id": getattr(sender, "id", None),
+                "sender_name": sender_name,
+                "text": item.message or "",
+                "media_type": self._detect_media_type(item),
+                "timestamp": item.date.isoformat(),
+            })
         messages.reverse()
         return messages
 
-    def _match_keyword(self, text: str) -> str | None:
-        """Find the first configured keyword present in a message."""
-
-        lowered = text.lower()
-        for keyword in self._keywords:
-            if keyword in lowered:
-                return keyword
-        return None
-
     @staticmethod
     def _detect_media_type(message) -> str | None:
-        """Infer a simple media type string for a Telethon message."""
-
         if message.photo:
             return "photo"
         if message.video:
@@ -227,12 +215,7 @@ class KeywordMonitor:
 
     @staticmethod
     def _cleanup_file(path: str) -> None:
-        """Delete a temporary file if it exists.
-
-        Args:
-            path: File path string.
-        """
-
         file_path = Path(path)
         if file_path.exists():
             file_path.unlink()
+
