@@ -74,8 +74,9 @@ class GeminiClient:
     async def summarize_messages(self, messages: list[dict]) -> str:
         if not messages:
             return "Xabarlar topilmadi."
+        unknown = "Noma'lum"
         lines = [
-            f"[{m.get('timestamp')}] {m.get('sender_name') or 'Noma\\'lum'}: {m.get('text') or '[media]'}"
+            f"[{m.get('timestamp')}] {m.get('sender_name') or unknown}: {m.get('text') or '[media]'}"
             for m in messages
         ]
         prompt = "\n\n".join([
