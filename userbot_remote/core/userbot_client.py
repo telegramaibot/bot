@@ -26,8 +26,13 @@ async def create_userbot_client(settings: Settings) -> TelegramClient:
     """
 
     if settings.session_string:
-        client = TelegramClient(StringSession(settings.session_string), settings.api_id, settings.api_hash)
-        logger.info("Using StringSession for Telethon startup.")
+        try:
+            client = TelegramClient(StringSession(settings.session_string), settings.api_id, settings.api_hash)
+            logger.info("Using StringSession for Telethon startup.")
+        except ValueError:
+            logger.warning("SESSION_STRING is set but invalid — falling back to file-based session.")
+            session_stem = str(settings.session_path.with_suffix(""))
+            client = TelegramClient(session_stem, settings.api_id, settings.api_hash)
     else:
         session_stem = str(settings.session_path.with_suffix(""))
         client = TelegramClient(session_stem, settings.api_id, settings.api_hash)
