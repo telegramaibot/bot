@@ -8,7 +8,6 @@ import asyncio
 
 from loguru import logger
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
 
 from userbot_remote.bot.handlers.message_handler import KeywordMonitor
@@ -41,16 +40,17 @@ async def create_userbot_client(settings: Settings) -> TelegramClient:
         logger.info("Telethon session loaded from {}.", settings.session_path)
         return client
 
-    logger.warning("Telethon session not authorized. Starting interactive login flow.")
-    await client.send_code_request(settings.phone_number)
-    code = await asyncio.to_thread(input, "Telegram code: ")
-    try:
-        await client.sign_in(phone=settings.phone_number, code=code.strip())
-    except SessionPasswordNeededError:
-        password = await asyncio.to_thread(input, "Telegram 2FA password: ")
-        await client.sign_in(password=password.strip())
-    logger.info("Telethon authorization completed and session saved.")
-    return client
+    # Interactive login is impossible on Railway/cloud (no stdin).
+    # The user must generate a SESSION_STRING locally and set it as env var.
+    raise RuntimeError(
+        "\n\n"
+        "❌ Telethon session topilmadi va SESSION_STRING o'rnatilmagan.\n\n"
+        "Railway'da ishlatish uchun SESSION_STRING kerak.\n"
+        "Uni lokal kompyuterda generate_session.py orqali oling:\n\n"
+        "    pip install Telethon\n"
+        "    python generate_session.py\n\n"
+        "Keyin Railway → Service → Variables ichiga SESSION_STRING qo'ying.\n"
+    )
 
 
 def register_monitoring_handlers(client: TelegramClient, monitor: KeywordMonitor) -> None:
