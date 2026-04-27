@@ -8,9 +8,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from datetime import timedelta
 
+import bcrypt
 from jose import JWTError, jwt
 from loguru import logger
-from passlib.context import CryptContext
 
 from userbot_remote.config.settings import Settings
 from userbot_remote.db.models import BanRecord, SessionRecord, UserRecord
@@ -34,7 +34,6 @@ class AuthManager:
 
         self.repository = repository
         self.settings = settings
-        self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         self.owner_notifier: OwnerNotifier | None = None
 
     def set_owner_notifier(self, notifier: OwnerNotifier | None) -> None:
@@ -49,12 +48,18 @@ class AuthManager:
     def hash_password(self, password: str) -> str:
         """Hash a plain-text password with bcrypt."""
 
-        return self.pwd_context.hash(password)
+        # bcrypt requires bytes; truncate to 72 bytes (bcrypt hard limit).
+        secret = password.encode("utf-8")[:72]
+        return bcrypt.hashpw(secret, bcrypt.gensalt()).decode("utf-8")
 
     def verify_password(self, plain: str, hashed: str) -> bool:
         """Verify a plain-text password against its stored hash."""
 
-        return self.pwd_context.verify(plain, hashed)
+        secret = plain.encode("utf-8")[:72]
+        try:
+            return bcrypt.checkpw(secret, hashed.encode("utf-8"))
+        except Exception:
+            return False
 
     def create_jwt_token(self, user_id: int, telegram_id: int) -> str:
         """Create a signed JWT token for an authenticated user."""
